@@ -9,6 +9,7 @@ import AdminLayout from "@/components/layout/AdminLayout";
 import Dashboard from "@/pages/Dashboard";
 import Events from "@/pages/Events";
 import EventForm from "@/pages/EventForm";
+import EventDetail from "@/pages/EventDetail";
 import Clubs from "@/pages/Clubs";
 import Timeline from "@/pages/Timeline";
 import MyClubs from "@/pages/MyClubs";
@@ -16,9 +17,13 @@ import Profile from "@/pages/Profile";
 import Login from "@/pages/Auth/Login";
 import Signup from "@/pages/Auth/Signup";
 import NotFound from "@/pages/NotFound";
+import Unauthorized from "@/pages/Unauthorized";
 import VerifyEmail from "@/pages/Auth/VerifyEmail";
 import EmailVerificationRequired from "@/pages/Auth/EmailVerificationRequired";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import Settings from "@/pages/Settings";
+import Terms from "@/pages/Terms";
+import Privacy from "@/pages/Privacy";
 
 // Admin pages
 import AdminDashboard from "@/pages/admin/Dashboard";
@@ -55,6 +60,10 @@ const App = () => (
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/email-verification-required" element={<EmailVerificationRequired />} />
             
+            {/* Legal Pages */}
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
+            
             {/* Main App Routes */}
             <Route path="/" element={
               <ProtectedRoute>
@@ -71,9 +80,16 @@ const App = () => (
               </ProtectedRoute>
             } />
             <Route path="/events/new" element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin={true}>
                 <AppLayout>
                   <EventForm />
+                </AppLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/events/:id" element={
+              <ProtectedRoute requireVerification={false}>
+                <AppLayout>
+                  <EventDetail />
                 </AppLayout>
               </ProtectedRoute>
             } />
@@ -102,6 +118,13 @@ const App = () => (
               <ProtectedRoute>
                 <AppLayout>
                   <Profile />
+                </AppLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/settings" element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <Settings />
                 </AppLayout>
               </ProtectedRoute>
             } />
@@ -135,6 +158,9 @@ const App = () => (
                 </AdminLayout>
               </ProtectedRoute>
             } />
+            
+            {/* Unauthorized Route */}
+            <Route path="/unauthorized" element={<Unauthorized />} />
             
             {/* 404 Route */}
             <Route path="*" element={<NotFound />} />

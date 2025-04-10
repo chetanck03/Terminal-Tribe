@@ -195,9 +195,15 @@ const EventsManagement = () => {
     <div className="container mx-auto py-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Event Management</h1>
-        <Button onClick={() => navigate('/admin/dashboard')} variant="outline">
-          Back to Dashboard
-        </Button>
+        <div className="flex gap-4">
+          <Button onClick={() => navigate('/events/new')} variant="default">
+            <Calendar className="mr-2 h-4 w-4" />
+            Create Event
+          </Button>
+          <Button onClick={() => navigate('/admin/dashboard')} variant="outline">
+            Back to Dashboard
+          </Button>
+        </div>
       </div>
       
       {/* Filters and Search */}

@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Filter, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,82 +14,97 @@ import {
 import { PageHeader } from "@/components/ui/page-header";
 import { ClubCard } from "@/components/ui/club-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { useAuth } from "@/lib/auth";
+import axios from "axios";
 
-// Mock data
-const clubs = [
-  {
-    id: "1",
-    name: "Photography Club",
-    description: "For students passionate about capturing moments and learning photography skills.",
-    members: 67,
-    category: "Arts",
-    image: "https://images.unsplash.com/photo-1606471191009-63994c53433b?q=80&w=1000"
-  },
-  {
-    id: "2",
-    name: "Coding Society",
-    description: "Where developers meet to code, learn and build amazing projects together.",
-    members: 104,
-    category: "Technology",
-    image: "https://images.unsplash.com/photo-1610563166150-b34df4f3bcd6?q=80&w=1000"
-  },
-  {
-    id: "3",
-    name: "Debate Team",
-    description: "Sharpen your critical thinking and public speaking skills through debates.",
-    members: 45,
-    category: "Academic",
-    image: "https://images.unsplash.com/photo-1494059980473-813e73ee784b?q=80&w=1000"
-  },
-  {
-    id: "4",
-    name: "Music Band",
-    description: "For those who love playing instruments and performing in front of audiences.",
-    members: 32,
-    category: "Music",
-    image: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?q=80&w=1000"
-  },
-  {
-    id: "5",
-    name: "Environmental Club",
-    description: "Working together to make our campus and community more sustainable and eco-friendly.",
-    members: 58,
-    category: "Environment",
-    image: "https://images.unsplash.com/photo-1537905569824-f89f14cceb68?q=80&w=1000"
-  },
-  {
-    id: "6",
-    name: "Chess Club",
-    description: "For beginners and masters alike who enjoy strategic thinking and friendly competition.",
-    members: 23,
-    category: "Games",
-    image: "https://images.unsplash.com/photo-1617112848923-cc2234396a8d?q=80&w=1000"
-  }
-];
-
-const myClubs = [
-  {
-    id: "2",
-    name: "Coding Society",
-    description: "Where developers meet to code, learn and build amazing projects together.",
-    members: 104,
-    category: "Technology",
-    image: "https://images.unsplash.com/photo-1610563166150-b34df4f3bcd6?q=80&w=1000",
-    isJoined: true
-  },
-  {
-    id: "5",
-    name: "Environmental Club",
-    description: "Working together to make our campus and community more sustainable and eco-friendly.",
-    members: 58,
-    category: "Environment",
-    image: "https://images.unsplash.com/photo-1537905569824-f89f14cceb68?q=80&w=1000",
-    isJoined: true
-  }
-];
+// Define club type interface
+interface Club {
+  id: string;
+  name: string;
+  description: string;
+  content?: string;
+  image?: string;
+  category?: string;
+  status: string;
+  createdBy: {
+    id: string;
+    name: string;
+  };
+  _count?: {
+    members: number;
+  };
+  members?: Array<{
+    user: {
+      id: string;
+      name: string;
+    };
+    role: string;
+  }>;
+}
 
 const Clubs = () => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [clubs, setClubs] = useState<Club[]>([]);
+  const [myClubs, setMyClubs] = useState<Club[]>([]);
+  const [trendingClubs, setTrendingClubs] = useState<Club[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { user, isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    const fetchClubs = async () => {
+      try {
+        setLoading(true);
+        const response = await axios.get('/api/clubs');
+        
+        const allClubs = response.data;
+        
+        // Set all active clubs
+        setClubs(allClubs);
+        
+        // Get trending clubs (clubs with most members)
+        const sortedByMembers = [...allClubs].sort((a, b) => 
+          (b._count?.members || 0) - (a._count?.members || 0)
+        );
+        setTrendingClubs(sortedByMembers.slice(0, 3)); // Top 3 clubs
+        
+        // If authenticated, filter my clubs
+        if (isAuthenticated && user) {
+          // Fetch user's club memberships
+          try {
+            const userClubsResponse = await axios.get(`/api/users/${user.id}/clubs`);
+            if (userClubsResponse.data && Array.isArray(userClubsResponse.data)) {
+              setMyClubs(userClubsResponse.data);
+            }
+          } catch (err) {
+            console.error("Error fetching user club memberships:", err);
+            
+            // Fallback: try to determine my clubs from the club data if it includes members
+            const mine = allClubs.filter(club => 
+              club.members && club.members.some(member => member.user.id === user.id)
+            );
+            setMyClubs(mine);
+          }
+        }
+        
+        setError(null);
+      } catch (err) {
+        console.error("Error fetching clubs:", err);
+        setError("Failed to load clubs. Please try again later.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchClubs();
+  }, [isAuthenticated, user]);
+
+  // Filter clubs based on search term
+  const filteredClubs = clubs.filter(club => 
+    club.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    club.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (club.category && club.category.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   return (
     <div className="animate-fade-in">
@@ -148,18 +162,69 @@ const Clubs = () => {
         </TabsList>
         
         <TabsContent value="explore" className="mt-0">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {clubs.map((club) => (
-              <ClubCard key={club.id} {...club} />
-            ))}
-          </div>
+          {loading ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-center">Loading clubs...</p>
+              </CardContent>
+            </Card>
+          ) : error ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-center text-red-500">{error}</p>
+              </CardContent>
+            </Card>
+          ) : filteredClubs.length === 0 ? (
+            <Card>
+              <CardHeader>No clubs found</CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground">There are no clubs matching your search.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredClubs.map((club) => (
+                <ClubCard 
+                  key={club.id} 
+                  id={club.id}
+                  name={club.name}
+                  description={club.description}
+                  members={club._count?.members || 0}
+                  category={club.category}
+                  image={club.image}
+                />
+              ))}
+            </div>
+          )}
         </TabsContent>
         
         <TabsContent value="my-clubs" className="mt-0">
-          {myClubs.length > 0 ? (
+          {!isAuthenticated ? (
+            <Card>
+              <CardHeader>You need to sign in</CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground">Please sign in to see your clubs.</p>
+              </CardContent>
+            </Card>
+          ) : loading ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-center">Loading your clubs...</p>
+              </CardContent>
+            </Card>
+          ) : myClubs.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {myClubs.map((club) => (
-                <ClubCard key={club.id} {...club} />
+                <ClubCard 
+                  key={club.id} 
+                  id={club.id}
+                  name={club.name}
+                  description={club.description}
+                  members={club._count?.members || 0}
+                  category={club.category}
+                  image={club.image}
+                  isJoined={true}
+                />
               ))}
             </div>
           ) : (
@@ -174,11 +239,34 @@ const Clubs = () => {
         </TabsContent>
         
         <TabsContent value="trending" className="mt-0">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {clubs.slice(0, 3).map((club) => (
-              <ClubCard key={club.id} {...club} />
-            ))}
-          </div>
+          {loading ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-center">Loading trending clubs...</p>
+              </CardContent>
+            </Card>
+          ) : trendingClubs.length === 0 ? (
+            <Card>
+              <CardHeader>No trending clubs found</CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground">Check back later for trending clubs.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {trendingClubs.map((club) => (
+                <ClubCard 
+                  key={club.id} 
+                  id={club.id}
+                  name={club.name}
+                  description={club.description}
+                  members={club._count?.members || 0}
+                  category={club.category}
+                  image={club.image}
+                />
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

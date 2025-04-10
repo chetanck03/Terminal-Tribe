@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import ChatBot from "../ChatBot";
 
 import {
   LayoutDashboard,
@@ -12,6 +13,7 @@ import {
   X,
   Home,
   LogOut,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -23,7 +25,33 @@ interface AdminLayoutProps {
 const AdminLayout = ({ children }: AdminLayoutProps) => {
   const { user, signOut } = useAuth();
   const location = useLocation();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [initials, setInitials] = useState("U");
+
+  useEffect(() => {
+    // Start with sidebar closed on mobile, open on desktop
+    setIsSidebarOpen(window.innerWidth >= 768);
+    
+    // Load user avatar
+    if (user) {
+      setAvatarLoading(true);
+      setUserAvatar(user.user_metadata?.avatar || null);
+      
+      // Calculate initials
+      const name = user.user_metadata?.name || user.email?.split('@')[0] || "";
+      const initials = name.split(' ')
+        .map(part => part.charAt(0).toUpperCase())
+        .slice(0, 2)
+        .join('');
+        
+      setInitials(initials || user.email?.charAt(0).toUpperCase() || "U");
+      
+      // Set small timeout to ensure state updates properly
+      setTimeout(() => setAvatarLoading(false), 100);
+    }
+  }, [user, user?.user_metadata?.avatar]);
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
@@ -53,7 +81,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
   return (
     <div className="h-screen flex flex-col">
       {/* Admin Header */}
-      <header className="bg-white border-b shadow-sm z-10 flex items-center h-16 px-4">
+      <header className="bg-white border-b shadow-sm z-10 flex items-center h-16 px-4 fixed top-0 left-0 right-0">
         <div className="flex items-center">
           <Button variant="ghost" size="icon" onClick={toggleSidebar} className="md:hidden">
             {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
@@ -76,8 +104,15 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
           {user && (
             <div className="flex items-center">
               <Avatar className="h-8 w-8">
-                <AvatarImage src="/placeholder.svg" alt="User" />
-                <AvatarFallback>{user.email?.charAt(0).toUpperCase() || "U"}</AvatarFallback>
+                {!avatarLoading && (
+                  <>
+                    <AvatarImage src={userAvatar || ""} alt="User" loading="eager" />
+                    <AvatarFallback>{initials}</AvatarFallback>
+                  </>
+                )}
+                {avatarLoading && (
+                  <AvatarFallback className="animate-pulse">{initials}</AvatarFallback>
+                )}
               </Avatar>
               <span className="ml-2 text-sm font-medium hidden md:block">{user.email}</span>
             </div>
@@ -85,7 +120,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
         </div>
       </header>
       
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden pt-16">
         {/* Sidebar */}
         <aside
           className={cn(
@@ -134,6 +169,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
           <div className="min-h-full">{children}</div>
         </main>
       </div>
+      <ChatBot configUrl="https://files.bpcontent.cloud/2025/04/10/10/20250410104555-7B33LUMD.json" />
     </div>
   );
 };

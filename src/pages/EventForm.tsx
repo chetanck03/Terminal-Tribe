@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Calendar, Clock, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,8 +15,12 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { useToast } from "@/hooks/use-toast";
+import { createEvent } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 
 const EventForm = () => {
+  const { user, isAdmin, loading } = useAuth();
   const [formData, setFormData] = useState({
     title: "",
     date: "",
@@ -32,6 +35,19 @@ const EventForm = () => {
   const { toast } = useToast();
   
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Redirect if not admin
+  useEffect(() => {
+    if (!loading && !isAdmin) {
+      toast({
+        title: "Access Denied",
+        description: "Only administrators can create events.",
+        variant: "destructive"
+      });
+      navigate("/");
+    }
+  }, [isAdmin, loading, navigate, toast]);
   
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -57,18 +73,146 @@ const EventForm = () => {
     }
   };
   
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Submitting event:", formData);
     
-    // Simulate successful submission
-    toast({
-      title: "Event Created",
-      description: "Your event has been created successfully.",
-    });
-    
-    navigate("/events");
+    try {
+      setIsSubmitting(true);
+      
+      // Check for admin status again before submitting
+      if (!isAdmin) {
+        toast({
+          title: "Permission Denied",
+          description: "Only administrators can create events.",
+          variant: "destructive"
+        });
+        navigate("/unauthorized");
+        return;
+      }
+      
+      // Combine date and time
+      const dateTime = new Date(`${formData.date}T${formData.time}`);
+      
+      // Process the image - set a max size limit
+      const MAX_IMAGE_SIZE = 1000000; // 1MB
+      
+      // Convert image to base64 if exists
+      let imageBase64 = null;
+      if (formData.image) {
+        // First check file size before processing
+        if (formData.image.size > 5 * 1024 * 1024) { // 5MB
+          toast({
+            title: "Image Too Large",
+            description: "Please select an image smaller than 5MB",
+            variant: "destructive"
+          });
+          setIsSubmitting(false);
+          return;
+        }
+        
+        imageBase64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(formData.image);
+        });
+      }
+      
+      // Optimize image if needed
+      let optimizedImage = imageBase64;
+      if (imageBase64 && imageBase64.length > MAX_IMAGE_SIZE) {
+        console.log("Image is large, optimizing...");
+        
+        try {
+          const img = new Image();
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = imageBase64 as string;
+          });
+          
+          // Calculate new dimensions (max 800px width)
+          const maxWidth = 800;
+          const scale = Math.min(maxWidth / img.width, 1);
+          
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          
+          // Get optimized image data with quality of 0.7
+          optimizedImage = canvas.toDataURL('image/jpeg', 0.7);
+          
+          console.log(`Image optimized: ${imageBase64?.length} -> ${optimizedImage.length} bytes`);
+        } catch (err) {
+          console.error("Error optimizing image:", err);
+          // Fallback to original image if optimization fails
+          optimizedImage = imageBase64;
+        }
+      }
+      
+      console.log("Submitting event with optimized image");
+      
+      const eventData = {
+        title: formData.title,
+        description: formData.description,
+        content: formData.description, // Using description as content for simplicity
+        date: dateTime.toISOString(),
+        location: formData.location,
+        image: optimizedImage,
+        category: formData.category
+      };
+      
+      // Call the API to create the event
+      const response = await createEvent(eventData);
+      console.log("Event creation response:", response);
+      
+      toast({
+        title: "Event Created",
+        description: "Your event has been created successfully.",
+      });
+      
+      navigate("/admin/events");
+    } catch (error: any) {
+      console.error("Error creating event:", error);
+      let errorMessage = "Failed to create event. Please try again.";
+      
+      // Check for specific error types
+      if (error.response) {
+        console.error("Server error response:", error.response.data);
+        
+        if (error.response.status === 403) {
+          errorMessage = "Permission denied. Only administrators can create events.";
+          navigate("/unauthorized");
+        } else if (error.response.status === 401) {
+          errorMessage = "Authentication error. Please log in again.";
+          // Force logout and redirect to login
+          supabase.auth.signOut().then(() => navigate("/login"));
+        } else if (error.response.data && error.response.data.error) {
+          errorMessage = error.response.data.error;
+        }
+      } else if (error.request) {
+        errorMessage = "No response from server. Please check your connection.";
+      }
+      
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+  
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-campus-blue"></div>
+      </div>
+    );
+  }
   
   return (
     <div className="animate-fade-in">
@@ -189,10 +333,17 @@ const EventForm = () => {
               </div>
               
               <div className="flex items-center gap-4 pt-4">
-                <Link to="/events">
+                <Link to="/admin/events">
                   <Button variant="outline" type="button">Cancel</Button>
                 </Link>
-                <Button type="submit">Create Event</Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-b-transparent"></span>
+                      Creating...
+                    </>
+                  ) : "Create Event"}
+                </Button>
               </div>
             </form>
           </CardContent>

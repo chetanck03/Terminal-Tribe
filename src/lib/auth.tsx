@@ -18,6 +18,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isEmailVerified: boolean;
+  updateUser: (userData: any) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -70,7 +71,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      // Use the correct table name - "User" instead of "users"
+      console.log('Checking role for user ID:', userId);
+      
+      // Try to get user data from Supabase User table
       const { data, error } = await supabase
         .from('User')
         .select('role')
@@ -78,68 +81,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
       
       if (error) {
-        // If there's an error about the table not existing, handle it gracefully
-        if (error.code === '42P01') { // PostgreSQL error code for "relation does not exist"
-          console.warn('User table does not exist yet. Creating it with Prisma migrations is recommended.');
-          
-          // If this is the first user, you might want to make them an admin
-          // For now, we'll set isAdmin to false for safety
-          setIsAdmin(false);
+        console.error('Error fetching user role:', error);
+        
+        // If table doesn't exist or user doesn't exist, try the built-in user metadata
+        if (user && user.app_metadata && user.app_metadata.role === 'ADMIN') {
+          console.log('Setting admin from app_metadata');
+          setIsAdmin(true);
           return;
         }
         
-        // Handle "no rows returned" error case
-        if (error.code === 'PGRST116') {
-          console.warn('User record not found in database, creating it now...');
+        // For development purposes, make the first user an admin if they don't exist
+        if (error.code === 'PGRST116') { // No rows returned
+          console.log('User not found in DB, trying to create');
+          await createUserRecordIfNotExists(userId, user?.email || '', user?.user_metadata?.name);
           
-          if (user && user.email) {
-            try {
-              await createUserRecordIfNotExists(userId, user.email, user.user_metadata?.name);
-              // After creating, try to fetch the user role again
-              const { data: newData, error: newError } = await supabase
-                .from('User')
-                .select('role')
-                .eq('id', userId)
-                .single();
-              
-              if (!newError) {
-                setIsAdmin(newData.role === 'ADMIN');
-                return;
-              }
-            } catch (createError) {
-              console.error('Error creating user record:', createError);
-            }
+          // After creating, check again
+          const { data: newData, error: newError } = await supabase
+            .from('User')
+            .select('role')
+            .eq('id', userId)
+            .single();
+          
+          if (!newError) {
+            console.log('User created, role is:', newData.role);
+            setIsAdmin(newData.role === 'ADMIN');
+            return;
           }
-          
-          setIsAdmin(false);
-          return;
         }
         
-        // For other errors, throw them
-        throw error;
+        // Default to false for safety
+        console.log('Defaulting to non-admin role');
+        setIsAdmin(false);
+        return;
       }
       
+      console.log('User role from database:', data?.role);
       setIsAdmin(data?.role === 'ADMIN');
     } catch (error) {
-      console.error('Error checking user role:', error);
-      
-      // Set to false by default for safety
+      console.error('Error in checkUserRole:', error);
       setIsAdmin(false);
-      
-      // Try to create the user record in case it doesn't exist
-      if (user && user.email) {
-        try {
-          await createUserRecordIfNotExists(userId, user.email, user.user_metadata?.name);
-        } catch (createError) {
-          console.error('Error creating user record:', createError);
-        }
-      }
     }
   }
 
   // Helper function to create a user record if it doesn't exist
   async function createUserRecordIfNotExists(userId: string, email: string, name?: string) {
     try {
+      // Get current user metadata to check for avatar
+      let avatarUrl = null;
+      
+      if (user?.user_metadata?.avatar) {
+        avatarUrl = user.user_metadata.avatar;
+      }
+      
       // Use the correct table name - "User" instead of "users"
       const { data, error } = await supabase
         .from('User')
@@ -148,6 +141,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: email,
           name: name || email.split('@')[0], // Use part of email as name if not provided
           role: 'USER',
+          avatar: avatarUrl,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         }, { onConflict: 'id' });
       
       if (error) throw error;
@@ -225,6 +221,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  // Update user data in context
+  const updateUser = async (userData: any) => {
+    if (!user) return;
+    
+    try {
+      // Update user metadata in Supabase
+      const { data, error } = await supabase.auth.updateUser({
+        data: userData
+      });
+      
+      if (error) throw error;
+      
+      // If avatar is being updated, also update it in the User table
+      if (userData.avatar !== undefined) {
+        try {
+          const { error: dbError } = await supabase
+            .from('User')
+            .update({
+              avatar: userData.avatar,
+              updatedAt: new Date().toISOString()
+            })
+            .eq('id', user.id);
+            
+          if (dbError) {
+            console.warn('Failed to update avatar in User table:', dbError);
+          }
+        } catch (dbError) {
+          console.error('Error syncing avatar to database:', dbError);
+        }
+      }
+      
+      // Update local state with new user data
+      if (data.user) {
+        setUser(data.user);
+      }
+    } catch (error) {
+      console.error('Error updating user data:', error);
+    }
+  };
+
   const value = {
     session,
     user,
@@ -234,6 +270,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signOut,
     isAdmin,
     isEmailVerified,
+    updateUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

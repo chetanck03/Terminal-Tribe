@@ -1,12 +1,12 @@
-
 import { Link, useLocation } from 'react-router-dom';
 import { 
   Calendar, Home, Users, Clock, BookOpen, 
-  PlusCircle, Bell, ChevronRight, Settings 
+  PlusCircle, Bell, ChevronRight, Settings, User 
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/lib/auth';
 
 const sidebarItems = [
   {
@@ -36,18 +36,34 @@ const sidebarItems = [
   }
 ];
 
+const userItems = [
+  {
+    label: 'Profile',
+    icon: User,
+    href: '/profile'
+  },
+  {
+    label: 'Settings',
+    icon: Settings,
+    href: '/settings'
+  }
+];
+
 const Sidebar = () => {
   const location = useLocation();
+  const { isAdmin } = useAuth();
   
   return (
     <div className="flex flex-col h-full border-r bg-white w-full">
-      <div className="p-4">
-        <Link to="/events/new">
-          <Button className="w-full gap-2">
-            <PlusCircle size={18} /> Add Event
-          </Button>
-        </Link>
-      </div>
+      {isAdmin && (
+        <div className="p-4">
+          <Link to="/events/new">
+            <Button className="w-full gap-2">
+              <PlusCircle size={18} /> Add Event
+            </Button>
+          </Link>
+        </div>
+      )}
       
       <ScrollArea className="flex-1 px-2">
         <div className="space-y-1 py-2">
@@ -84,15 +100,41 @@ const Sidebar = () => {
             </Link>
           ))}
         </div>
+        
+        <div className="mt-4">
+          <h3 className="mb-2 px-4 text-xs font-semibold text-muted-foreground">
+            Account
+          </h3>
+          {userItems.map((item) => (
+            <Link
+              key={item.href}
+              to={item.href}
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all hover:bg-muted",
+                location.pathname === item.href ? "bg-muted text-campus-blue" : "text-muted-foreground"
+              )}
+            >
+              <item.icon size={18} />
+              <span>{item.label}</span>
+              {location.pathname === item.href && (
+                <ChevronRight size={16} className="ml-auto" />
+              )}
+            </Link>
+          ))}
+        </div>
       </ScrollArea>
       
       <div className="border-t p-4">
         <div className="flex items-center justify-between">
-          <Button variant="ghost" size="icon">
-            <Bell size={18} />
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/notifications">
+              <Bell size={18} />
+            </Link>
           </Button>
-          <Button variant="ghost" size="icon">
-            <Settings size={18} />
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/settings">
+              <Settings size={18} />
+            </Link>
           </Button>
         </div>
       </div>

@@ -1,8 +1,8 @@
-
 import { ReactNode } from 'react';
 import Navbar from './Navbar';
 import Sidebar from './Sidebar';
 import MobileNav from './MobileNav';
+import ChatBot from '../ChatBot';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -10,7 +10,7 @@ interface AppLayoutProps {
 
 const AppLayout = ({ children }: AppLayoutProps) => {
   return (
-    <div className="min-h-screen flex flex-col bg-campus-gray/30">
+    <div className="min-h-screen flex flex-col bg-campus-gray/30 pt-16">
       <Navbar />
       <div className="flex flex-1">
         <div className="hidden md:block fixed h-[calc(100vh-4rem)] top-16 left-0 w-64 z-10">
@@ -21,6 +21,7 @@ const AppLayout = ({ children }: AppLayoutProps) => {
         </main>
       </div>
       <MobileNav />
+      <ChatBot configUrl="https://files.bpcontent.cloud/2025/04/10/10/20250410104555-7B33LUMD.json" />
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { json } from 'body-parser';
 import jwt from 'jsonwebtoken';
@@ -11,37 +11,50 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(json());
 
+// Define custom interface for Request with user property
+interface AuthenticatedRequest extends Request {
+  user: {
+    id: string;
+    role?: string;
+    [key: string]: any;
+  };
+}
+
 // Auth middleware
-const authenticateToken = (req: any, res: any, next: any) => {
+const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  if (!token) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
   
   try {
     const secret = process.env.VITE_JWT_SECRET as string;
-    const decoded = jwt.verify(token, secret);
-    req.user = decoded;
+    const decoded = jwt.verify(token, secret) as jwt.JwtPayload;
+    (req as AuthenticatedRequest).user = decoded;
     next();
   } catch (error) {
-    return res.status(403).json({ error: 'Invalid token' });
+    res.status(403).json({ error: 'Invalid token' });
   }
 };
 
 // Check admin middleware
-const isAdmin = async (req: any, res: any, next: any) => {
+const isAdmin = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
     });
     
     if (!user || user.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Forbidden: Admin access required' });
+      res.status(403).json({ error: 'Forbidden: Admin access required' });
+      return;
     }
     
     next();
   } catch (error) {
-    return res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error' });
   }
 };
 
@@ -51,7 +64,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // User routes
-app.get('/api/users', authenticateToken, isAdmin, async (req, res) => {
+app.get('/api/users', authenticateToken, isAdmin as any, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const users = await prisma.user.findMany({
       select: {
@@ -68,7 +81,7 @@ app.get('/api/users', authenticateToken, isAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/users/:id', authenticateToken, async (req, res) => {
+app.get('/api/users/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const user = await prisma.user.findUnique({
@@ -83,7 +96,8 @@ app.get('/api/users/:id', authenticateToken, async (req, res) => {
     });
     
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
     
     res.json(user);
@@ -92,19 +106,21 @@ app.get('/api/users/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', authenticateToken, async (req: any, res) => {
+app.put('/api/users/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { name, role } = req.body;
     
     // Only admins can update role
     if (role && req.user.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Only admins can update roles' });
+      res.status(403).json({ error: 'Only admins can update roles' });
+      return;
     }
     
     // Users can only update their own profile unless they're an admin
     if (id !== req.user.id && req.user.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'You can only update your own profile' });
+      res.status(403).json({ error: 'You can only update your own profile' });
+      return;
     }
     
     const updatedUser = await prisma.user.update({
@@ -127,14 +143,78 @@ app.put('/api/users/:id', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Avatar update endpoint
+app.put('/api/users/:id/avatar', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { avatar } = req.body;
+    
+    // Users can only update their own avatar unless they're an admin
+    if (id !== req.user.id && req.user.role !== 'ADMIN') {
+      res.status(403).json({ error: 'You can only update your own avatar' });
+      return;
+    }
+    
+    // Validate the avatar data
+    if (!avatar || typeof avatar !== 'string' || !avatar.startsWith('data:image/')) {
+      res.status(400).json({ error: 'Invalid avatar format' });
+      return;
+    }
+    
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: { avatar },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        avatar: true,
+      },
+    });
+    
+    res.json(updatedUser);
+  } catch (error) {
+    console.error('Error updating avatar:', error);
+    res.status(500).json({ error: 'Error updating avatar' });
+  }
+});
+
+// Delete user
+app.delete('/api/users/:id', authenticateToken, isAdmin as any, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    
+    // Check if the user exists
+    const user = await prisma.user.findUnique({
+      where: { id },
+    });
+    
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    
+    // Delete the user
+    await prisma.user.delete({
+      where: { id },
+    });
+    
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting user' });
+  }
+});
+
 // Event routes
-app.get('/api/events', async (req, res) => {
+app.get('/api/events', async (req: Request, res: Response): Promise<void> => {
   try {
     const { status } = req.query;
     
     const events = await prisma.event.findMany({
       where: {
         ...(status && { status: status as string }),
+        status: 'APPROVED', // Only return approved events
       },
       include: {
         createdBy: {
@@ -153,12 +233,15 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
-app.get('/api/events/:id', async (req, res) => {
+app.get('/api/events/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     
     const event = await prisma.event.findUnique({
-      where: { id },
+      where: { 
+        id,
+        status: 'APPROVED', // Only return approved events
+      },
       include: {
         createdBy: {
           select: {
@@ -180,7 +263,8 @@ app.get('/api/events/:id', async (req, res) => {
     });
     
     if (!event) {
-      return res.status(404).json({ error: 'Event not found' });
+      res.status(404).json({ error: 'Event not found' });
+      return;
     }
     
     res.json(event);
@@ -189,7 +273,7 @@ app.get('/api/events/:id', async (req, res) => {
   }
 });
 
-app.post('/api/events', authenticateToken, async (req: any, res) => {
+app.post('/api/events', authenticateToken, isAdmin, async (req: any, res) => {
   try {
     const { title, description, content, date, location, image, clubId } = req.body;
     
@@ -202,17 +286,19 @@ app.post('/api/events', authenticateToken, async (req: any, res) => {
         location,
         image,
         userId: req.user.id,
+        status: 'APPROVED', // Auto-approve events created by admins
         ...(clubId && { clubId }),
       },
     });
     
     res.status(201).json(event);
   } catch (error) {
+    console.error('Error creating event:', error);
     res.status(500).json({ error: 'Error creating event' });
   }
 });
 
-app.put('/api/events/:id', authenticateToken, async (req: any, res) => {
+app.put('/api/events/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { title, description, content, date, location, image } = req.body;
@@ -224,11 +310,13 @@ app.put('/api/events/:id', authenticateToken, async (req: any, res) => {
     });
     
     if (!event) {
-      return res.status(404).json({ error: 'Event not found' });
+      res.status(404).json({ error: 'Event not found' });
+      return;
     }
     
     if (event.userId !== req.user.id && req.user.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Not authorized to update this event' });
+      res.status(403).json({ error: 'Not authorized to update this event' });
+      return;
     }
     
     const updatedEvent = await prisma.event.update({
@@ -249,7 +337,7 @@ app.put('/api/events/:id', authenticateToken, async (req: any, res) => {
   }
 });
 
-app.delete('/api/events/:id', authenticateToken, async (req: any, res) => {
+app.delete('/api/events/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     
@@ -260,11 +348,13 @@ app.delete('/api/events/:id', authenticateToken, async (req: any, res) => {
     });
     
     if (!event) {
-      return res.status(404).json({ error: 'Event not found' });
+      res.status(404).json({ error: 'Event not found' });
+      return;
     }
     
     if (event.userId !== req.user.id && req.user.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Not authorized to delete this event' });
+      res.status(403).json({ error: 'Not authorized to delete this event' });
+      return;
     }
     
     await prisma.event.delete({
@@ -327,7 +417,7 @@ app.post('/api/events/:id/reject', authenticateToken, isAdmin, async (req, res) 
 });
 
 // Event participation
-app.post('/api/events/:id/join', authenticateToken, async (req: any, res) => {
+app.post('/api/events/:id/join', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -339,11 +429,13 @@ app.post('/api/events/:id/join', authenticateToken, async (req: any, res) => {
     });
     
     if (!event) {
-      return res.status(404).json({ error: 'Event not found' });
+      res.status(404).json({ error: 'Event not found' });
+      return;
     }
     
     if (event.status !== 'APPROVED') {
-      return res.status(400).json({ error: 'Event is not approved yet' });
+      res.status(400).json({ error: 'Event is not approved yet' });
+      return;
     }
     
     // Check if user already joined
@@ -357,7 +449,8 @@ app.post('/api/events/:id/join', authenticateToken, async (req: any, res) => {
     });
     
     if (existingJoin) {
-      return res.status(400).json({ error: 'Already joined this event' });
+      res.status(400).json({ error: 'Already joined this event' });
+      return;
     }
     
     // Join the event
@@ -374,7 +467,7 @@ app.post('/api/events/:id/join', authenticateToken, async (req: any, res) => {
   }
 });
 
-app.delete('/api/events/:id/join', authenticateToken, async (req: any, res) => {
+app.delete('/api/events/:id/join', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -390,7 +483,8 @@ app.delete('/api/events/:id/join', authenticateToken, async (req: any, res) => {
     });
     
     if (!join) {
-      return res.status(404).json({ error: 'Not joined this event' });
+      res.status(404).json({ error: 'Not joined this event' });
+      return;
     }
     
     // Leave the event
@@ -410,13 +504,14 @@ app.delete('/api/events/:id/join', authenticateToken, async (req: any, res) => {
 });
 
 // Club routes
-app.get('/api/clubs', async (req, res) => {
+app.get('/api/clubs', async (req: Request, res: Response): Promise<void> => {
   try {
     const { status } = req.query;
     
     const clubs = await prisma.club.findMany({
       where: {
         ...(status && { status: status as string }),
+        status: 'ACTIVE', // Only return active clubs
       },
       include: {
         createdBy: {
@@ -439,12 +534,15 @@ app.get('/api/clubs', async (req, res) => {
   }
 });
 
-app.get('/api/clubs/:id', async (req, res) => {
+app.get('/api/clubs/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     
     const club = await prisma.club.findUnique({
-      where: { id },
+      where: { 
+        id,
+        status: 'ACTIVE', // Only return active clubs
+      },
       include: {
         createdBy: {
           select: {
@@ -479,7 +577,8 @@ app.get('/api/clubs/:id', async (req, res) => {
     });
     
     if (!club) {
-      return res.status(404).json({ error: 'Club not found' });
+      res.status(404).json({ error: 'Club not found' });
+      return;
     }
     
     res.json(club);
@@ -488,7 +587,62 @@ app.get('/api/clubs/:id', async (req, res) => {
   }
 });
 
-app.post('/api/clubs', authenticateToken, async (req: any, res) => {
+// Update club
+app.put('/api/clubs/:id', authenticateToken, isAdmin as any, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { name, description, status } = req.body;
+    
+    const club = await prisma.club.findUnique({
+      where: { id },
+    });
+    
+    if (!club) {
+      res.status(404).json({ error: 'Club not found' });
+      return;
+    }
+    
+    const updatedClub = await prisma.club.update({
+      where: { id },
+      data: {
+        name,
+        description,
+        status,
+      },
+    });
+    
+    res.json(updatedClub);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating club' });
+  }
+});
+
+// Delete club
+app.delete('/api/clubs/:id', authenticateToken, isAdmin as any, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    
+    const club = await prisma.club.findUnique({
+      where: { id },
+    });
+    
+    if (!club) {
+      res.status(404).json({ error: 'Club not found' });
+      return;
+    }
+    
+    // Delete the club
+    await prisma.club.delete({
+      where: { id },
+    });
+    
+    res.json({ message: 'Club deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting club' });
+  }
+});
+
+app.post('/api/clubs', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { name, description, content, image } = req.body;
     
